@@ -49,3 +49,15 @@ catalog:
         token:
           $env: OKTA_TOKEN
 ```
+
+Alternatively, a `groups` field allows a filtered list of groups to be selected
+
+```yaml
+catalog:
+  providers:
+    okta:
+      - orgUrl: 'https://tenant.okta.com'
+        token:
+          $env: OKTA_TOKEN
+        groups: ["group1", "group2"]
+```

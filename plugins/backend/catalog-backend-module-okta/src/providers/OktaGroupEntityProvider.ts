@@ -28,6 +28,7 @@ import {
   UserNamingStrategy,
   userNamingStrategyFactory,
 } from './userNamingStrategyFactory';
+import { Client } from '@okta/okta-sdk-nodejs';
 
 /**
  * Provides entities from Okta Group service.
@@ -35,6 +36,7 @@ import {
 export class OktaGroupEntityProvider extends OktaEntityProvider {
   private readonly namingStrategy: GroupNamingStrategy;
   private readonly userNamingStrategy: UserNamingStrategy;
+  private readonly groups: string[] | undefined;
 
   static fromConfig(
     config: Config,
@@ -46,8 +48,9 @@ export class OktaGroupEntityProvider extends OktaEntityProvider {
   ) {
     const orgUrl = config.getString('orgUrl');
     const token = config.getString('token');
+    const groups = config.getOptionalStringArray("groups")
 
-    return new OktaGroupEntityProvider({ orgUrl, token }, options);
+    return new OktaGroupEntityProvider({ orgUrl, token }, options, groups);
   }
 
   constructor(
@@ -57,12 +60,14 @@ export class OktaGroupEntityProvider extends OktaEntityProvider {
       namingStrategy?: GroupNamingStrategies;
       userNamingStrategy?: UserNamingStrategies;
     },
+    groups: string[] | undefined
   ) {
     super(accountConfig, options);
     this.namingStrategy = groupNamingStrategyFactory(options.namingStrategy);
     this.userNamingStrategy = userNamingStrategyFactory(
       options.userNamingStrategy,
     );
+    this.groups = groups;
   }
 
   getProviderName(): string {
@@ -77,14 +82,41 @@ export class OktaGroupEntityProvider extends OktaEntityProvider {
     this.logger.info(
       `Providing okta group resources from okta: ${this.orgUrl}`,
     );
-    const groupResources: GroupEntity[] = [];
 
     const client = this.getClient();
-
     const defaultAnnotations = await this.buildDefaultAnnotations();
 
-    await client.listGroups().each(async group => {
+    const groupResources: GroupEntity[] = [];
+
+    if (this.groups) {
+      for (const group of this.groups) {
+        await this.listGroups(client, defaultAnnotations, groupResources, group);
+      }
+    }
+    else {
+      await this.listGroups(client, defaultAnnotations, groupResources);
+    }
+
+    await this.connection.applyMutation({
+      type: 'full',
+      entities: groupResources.map(entity => ({
+        entity,
+        locationKey: this.getProviderName(),
+      })),
+    });
+  }
+
+  private async listGroups(
+    client: Client, 
+    defaultAnnotations: Record<string, string> | undefined, 
+    groupResources: GroupEntity[], 
+    group: string | undefined = undefined) {
+
+    const queryParameters = group ? { q: group } : {}
+
+    await client.listGroups(queryParameters).each(async (group) => {
       const members: string[] = [];
+
       await group.listUsers().each(user => {
         members.push(this.userNamingStrategy(user));
       });
@@ -107,14 +139,6 @@ export class OktaGroupEntityProvider extends OktaEntityProvider {
       };
 
       groupResources.push(groupEntity);
-    });
-
-    await this.connection.applyMutation({
-      type: 'full',
-      entities: groupResources.map(entity => ({
-        entity,
-        locationKey: this.getProviderName(),
-      })),
     });
   }
 }

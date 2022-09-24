@@ -20,7 +20,7 @@ import { EntityProviderConnection } from '@backstage/plugin-catalog-backend';
 import { MockOktaCollection } from '../test-utls';
 import { getVoidLogger } from '@backstage/backend-common';
 
-let listGroups: () => MockOktaCollection = () => {
+let listGroups: (queryParameters:any) => MockOktaCollection = () => {
   return new MockOktaCollection([]);
 };
 
@@ -57,6 +57,68 @@ describe('OktaGroupProvider', () => {
       expect(entityProviderConnection.applyMutation).toBeCalledWith({
         type: 'full',
         entities: [],
+      });
+    });
+  });
+
+  describe('where there is a group filter', () => {
+    const config = new ConfigReader({
+      orgUrl: 'https://okta',
+      token: 'secret',
+      groups: ["group1"]
+    });
+
+    beforeEach(() => {
+      listGroups = (queryParameters:any) => {
+
+        // just ensuring we're passing in the matching group only
+        const q = queryParameters.q
+        expect(q).toEqual("group1")
+
+        return new MockOktaCollection([
+          {
+            id: 'group1',
+            profile: {
+              name: 'Everyone@the-company',
+              description: 'Everyone in the company',
+            },
+            listUsers: () => {
+              return new MockOktaCollection([
+                {
+                  id: 'asdfwefwefwef',
+                  profile: {
+                    email: 'fname@domain.com',
+                  },
+                },
+              ]);
+            },
+          },
+        ])
+      };
+    });
+
+    it('creates okta groups only for matching group', async () => {
+      const entityProviderConnection: EntityProviderConnection = {
+        applyMutation: jest.fn(),
+      };
+      const provider = OktaGroupEntityProvider.fromConfig(config, { logger });
+      provider.connect(entityProviderConnection);
+      await provider.run();
+      expect(entityProviderConnection.applyMutation).toBeCalledWith({
+        type: 'full',
+        entities: [
+          expect.objectContaining({
+            entity: expect.objectContaining({
+              kind: 'Group',
+              metadata: expect.objectContaining({
+                name: 'group1',
+              }),
+              spec: expect.objectContaining({
+                members: ['asdfwefwefwef'],
+              }),
+            }),
+          }),
+        ],
       });
     });
   });
